@@ -1,0 +1,7 @@
+# The source spreadsheet holds real inventory data and passwords. Never commit it.
+*.xlsx
+*.xls
+# Superseded August mockups
+design/
+.DS_Store
+.claude/
