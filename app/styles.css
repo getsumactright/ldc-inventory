@@ -290,3 +290,17 @@ select.fchip { appearance: none; -webkit-appearance: none; padding-right: 30px; 
 .done { min-height: 60dvh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; text-align: center; }
 .done .ic { width: 72px; height: 72px; padding: 16px; border-radius: 50%; background: var(--green-tint); color: var(--green); stroke-width: 2.5; }
 .done p { font-size: 18px; color: var(--slate); max-width: 28ch; }
+
+/* coordinator PIN */
+.pinpad { display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center; padding-top: 8px; }
+.pinlock { width: 56px; height: 56px; border-radius: 50%; background: var(--grey-tint); color: var(--slate); display: grid; place-items: center; }
+.pinlock .ic { width: 26px; height: 26px; }
+.pindots { display: flex; gap: 16px; margin-top: 12px; }
+.pindots b { width: 16px; height: 16px; border-radius: 50%; border: 1.5px solid var(--slate); }
+.pindots b.on { background: var(--ink); border-color: var(--ink); }
+.pinerr { min-height: 22px; color: var(--amber-deep); font-weight: 600; font-size: 14px; }
+.keys { display: grid; grid-template-columns: repeat(3, 76px); gap: 14px; margin: 4px 0 8px; }
+.keys button { height: 76px; border-radius: 50%; border: 1px solid var(--line); background: var(--surface); font-size: 28px; font-weight: 550; display: grid; place-items: center; }
+.keys button:active { background: var(--grey-tint); }
+.status.send { width: 100%; border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer; font-size: 16px; }
+button.row { width: 100%; background: none; border: 0; border-top: 1px solid var(--line-soft); text-align: left; cursor: pointer; }

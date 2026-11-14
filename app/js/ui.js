@@ -108,6 +108,25 @@ function shell(view) {
 }
 
 const VIEWS = {};
+
+/* ---------- coordinator lock ----------
+   A PIN kept on this device keeps volunteers out of the coordinator screens by accident.
+   It is a convenience lock, not security: there is no server, so anyone who clears the
+   browser's data, or reads this code, can get past it. */
+const GATED = new Set(['more', 'projects', 'project', 'movements', 'share', 'item', 'setup', 'setpin']);
+const LOCK_AFTER = 10 * 60 * 1000;
+let unlocked = false, unlockedAt = 0;
+const hasPin = () => !!M.S.meta.pin;
+const isOpen = () => !hasPin() || (unlocked && Date.now() - unlockedAt < LOCK_AFTER);
+async function hashPin(pin, salt) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(salt + ':' + pin));
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+async function savePin(pin) {
+  const salt = M.uid();
+  await M.setMeta('pin', { salt, hash: await hashPin(pin, salt) });
+  unlocked = true; unlockedAt = Date.now();
+}
 let current;
 
 function parseRoute() {
@@ -119,7 +138,9 @@ function render() {
   const { parts, q } = parseRoute();
   let name = parts[0] || 'home';
   if (!M.hall() || !VIEWS[name]) name = M.hall() ? 'home' : 'setup';
-  const view = VIEWS[name](parts.slice(1), q);
+  const gated = M.hall() && (GATED.has(name) || (name === 'log' && q.type === 'move'));
+  if (gated && isOpen()) unlockedAt = Date.now();
+  const view = gated && !isOpen() ? VIEWS.pin() : VIEWS[name](parts.slice(1), q);
   current = view;
   $('#app').innerHTML = shell(view);
   const root = $('#view');
@@ -150,9 +171,20 @@ VIEWS.home = () => {
     <a class="choice in" href="#/log?type=back">${ic('down')}<b>Bringing things back</b></a>
     <a class="choice plain" href="#/assets">${ic('box')}<b>See everything</b></a>
     <a class="status ${out ? 'warn' : 'good'}" href="#/assets?f=${out ? 'out' : 'all'}">${ic(out ? 'up' : 'check')}${out ? `${plural(out, 'thing')} out right now` : 'Everything is here'}</a>`}
-    <a class="morelink" href="#/more">${ic('menu')}More${unsent ? '<i class="dot"></i>' : ''}</a>`;
+    ${unsent && hasPin() ? `<button class="status send" data-act="send">${ic('mail')}Send my changes (${unsent})</button>` : ''}
+    <a class="morelink" href="#/more">${hasPin() && !isOpen() ? `${ic('lock')}Coordinator` : `${ic('menu')}More${unsent ? '<i class="dot"></i>' : ''}`}</a>`;
   return {
     tab: 'home', html,
+    on: {
+      send: async () => {
+        const ex = M.buildExport('changes');
+        const r = await emailFile(ex.name, ex.text, `${h.name} inventory changes`, `Changes from ${M.S.meta.userName || 'a volunteer'} for ${h.name}: ${plural(ex.movements, 'movement')}. Open it in LDC Inventory under Send or receive.`);
+        if (r === 'cancelled') return;
+        await M.markSent('changes', ex);
+        toast(r === 'downloaded' ? `Saved ${ex.name}. Attach it to the email that just opened.` : 'Sent.');
+        render();
+      },
+    },
     change: async el => { if (el.dataset.hall !== undefined) { await M.setMeta('hallId', el.value); render(); } },
   };
 };
@@ -172,8 +204,12 @@ VIEWS.more = () => {
     <section class="card list">
       ${row('#/item/new', 'plus', 'Add an item', 'Put a new piece of equipment on the list')}
       ${row('#/setup?new=1', 'home', 'Set up another hall', 'Keep a second hall on this device')}
+    </section>
+    <section class="card list">
+      ${row('#/setpin', 'lock', hasPin() ? 'Change the coordinator PIN' : 'Set a coordinator PIN', hasPin() ? 'Or turn the lock off' : 'Keep volunteers on the simple screens')}
+      ${hasPin() ? `<button class="row tall" data-act="lock"><span class="rowic">${ic('lock')}</span><span><b>Lock now</b><small>Locks by itself after 10 minutes</small></span></button>` : ''}
     </section>`;
-  return { tab: 'more', html };
+  return { tab: 'more', html, on: { lock: () => { unlocked = false; toast('Coordinator screens are locked.'); go('#/home'); } } };
 };
 
 /* ---------- Assets ---------- */
@@ -248,7 +284,7 @@ function assetDetail(a) {
   const rows = [['Brand', a.brand], ['Model', a.model], ['Serial', a.serial ? `<span class="mono">${esc(a.serial)}</span>` : '<i>None recorded</i>', true],
     ['Quantity', a.qty], ['Condition', a.condition], ['Home room', M.roomName(a.roomId)], ['Last inventoried', fdate(a.lastInventoried)], ['Notes', a.notes]];
   return `
-    <header class="top bar"><a class="backlink" href="#/assets">${ic('back')}Everything</a><a class="textbtn" href="#/item/${a.id}">Edit</a></header>
+    <header class="top bar"><a class="backlink" href="#/assets">${ic('back')}Everything</a>${isOpen() ? `<a class="textbtn" href="#/item/${a.id}">Edit</a>` : '<span></span>'}</header>
     <section class="card">
       <div class="between"><span class="mono">${esc(a.assetId)}</span>${statusChip(a, st)}</div>
       <h1>${esc(a.name)}</h1>
@@ -266,7 +302,7 @@ function assetDetail(a) {
       return `<div class="tl">${moveChip(m)}<time>${fdate(m.at)}</time><b>${plural(m.qty, 'unit')} · ${esc(m.from)} → ${esc(m.to)}</b><small>by ${esc(m.by)}${p ? ' · ' + esc(p.name) : ''}${m.notes ? ' · ' + esc(m.notes) : ''}</small></div>`;
     }).join('') || '<p class="empty">This item has not moved yet.</p>'}</section>
     <div class="stick">
-      <a class="btn" href="#/log?type=move&asset=${a.id}">${ic('swap')}Move</a>
+      ${isOpen() ? `<a class="btn" href="#/log?type=move&asset=${a.id}">${ic('swap')}Move</a>` : ''}
       ${st.out ? `<a class="btn primary" href="#/log?type=back&asset=${a.id}">${ic('down')}Bring back</a>` : `<a class="btn primary" href="#/log?type=out&asset=${a.id}">${ic('up')}Take out</a>`}
     </div>`;
 }
@@ -696,6 +732,7 @@ VIEWS.setup = (_, q) => {
       <label class="field"><span>Short code for asset IDs</span><input name="code" data-u="code" class="mono" value="${esc(U.code)}" placeholder="MPG" maxlength="5" required>
         <small class="mono" id="codehint">Items will be numbered LDC-${esc(U.code || 'MPG')}-0001, LDC-${esc(U.code || 'MPG')}-0002…</small></label>
       <label class="field"><span>Your name</span><input name="user" data-u="user" value="${esc(U.user || M.S.meta.userName || '')}" autocomplete="name" required><small>Shown on the movements you log.</small></label>
+      ${first ? `<label class="field"><span>Coordinator PIN (optional)</span><input name="pin" class="mono" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" placeholder="4 digits" autocomplete="off"><small>Volunteers use the simple screens without it. You need it for everything else.</small></label>` : ''}
     </section>
     <section class="card"><h2>2 · Rooms</h2><p class="sub">Where equipment normally lives.</p>
       <div class="chips wrap">${U.rooms.map((r, i) => `<button type="button" class="fchip" data-act="rmroom" data-i="${i}" aria-label="Remove ${esc(r)}">${esc(r)} ${ic('x')}</button>`).join('')}</div>
@@ -750,9 +787,86 @@ VIEWS.setup = (_, q) => {
     submit: async form => {
       if (U.mode === 'sheet' && !U.sheet) return toast('Choose the CSV file with your list, or pick "Start empty".');
       await M.createHall({ name: form.name.value.trim(), code: form.code.value.trim(), userName: form.user.value.trim(), roomNames: U.rooms, sheet: U.mode === 'sheet' ? U.sheet : null });
+      if (form.pin?.value) await savePin(form.pin.value);
       persist();
       U = { rooms: ['Auditorium', 'Stage', 'Sound Console', 'Foyer'], sheet: null, file: '', mode: 'empty', name: '', code: '', user: '' };
       toast('Your hall is set up.'); go('#/home');
+    },
+  };
+};
+
+/* ---------- Coordinator PIN ---------- */
+
+let pinEntry = '', pinError = '';
+
+VIEWS.pin = () => {
+  const html = `
+    <header class="top bar"><a class="textbtn" href="#/home">Cancel</a><span></span></header>
+    <div class="pinpad">
+      <span class="pinlock">${ic('lock')}</span>
+      <h1>Coordinator PIN</h1>
+      <p class="sub">This part is for the person who looks after the inventory.</p>
+      <div class="pindots" aria-label="${pinEntry.length} of 4 digits entered">${[0, 1, 2, 3].map(k => `<b class="${k < pinEntry.length ? 'on' : ''}"></b>`).join('')}</div>
+      <p class="pinerr" role="alert">${esc(pinError)}</p>
+      <div class="keys">${['1', '2', '3', '4', '5', '6', '7', '8', '9', '', '0', 'del'].map(k => k === '' ? '<span></span>'
+        : `<button type="button" data-act="key" data-k="${k}" ${k === 'del' ? 'aria-label="Delete"' : ''}>${k === 'del' ? ic('back') : k}</button>`).join('')}</div>
+      <a class="textbtn" href="#/forgot">Forgot the PIN?</a>
+    </div>`;
+  return {
+    modal: true, html, keepScroll: true,
+    on: {
+      key: async el => {
+        pinError = '';
+        if (el.dataset.k === 'del') pinEntry = pinEntry.slice(0, -1); else if (pinEntry.length < 4) pinEntry += el.dataset.k;
+        if (pinEntry.length === 4) {
+          const { salt, hash } = M.S.meta.pin;
+          const ok = (await hashPin(pinEntry, salt)) === hash;
+          pinEntry = '';
+          if (ok) { unlocked = true; unlockedAt = Date.now(); } else pinError = 'That PIN is not right. Try again.';
+        }
+        render();
+      },
+    },
+  };
+};
+
+VIEWS.forgot = () => {
+  const h = M.hall();
+  const html = `
+    <header class="top bar"><a class="backlink" href="#/home">${ic('back')}Home</a><span></span></header>
+    <h1>Forgot the PIN?</h1>
+    <p class="sub">There is no account behind this app, so the PIN cannot be emailed to you. To prove you look after this hall, type its full name exactly as it appears on the home screen. The PIN is then removed and you can set a new one. Nothing else is changed.</p>
+    <form class="card"><label class="field"><span>Hall name</span><input name="hall" autocomplete="off" required></label>
+      <button class="btn primary">Remove the PIN</button></form>`;
+  return {
+    modal: true, html,
+    submit: async form => {
+      if (form.hall.value.trim().toLowerCase() !== h.name.trim().toLowerCase()) return toast('That does not match the hall name.');
+      await M.setMeta('pin', null); unlocked = false; pinEntry = ''; pinError = '';
+      toast('PIN removed. Set a new one under More.'); go('#/more');
+    },
+  };
+};
+
+VIEWS.setpin = () => {
+  const html = `
+    <header class="top bar"><a class="backlink" href="#/more">${ic('back')}More</a><span></span></header>
+    <h1>${hasPin() ? 'Change the coordinator PIN' : 'Set a coordinator PIN'}</h1>
+    <p class="sub">With a PIN set, volunteers can take things out, bring them back, see the list and send their changes. Everything under More asks for the PIN. It is kept on this ${deviceName()} only, so set it on each device.</p>
+    <form class="card">
+      <label class="field"><span>New PIN</span><input name="a" class="mono" type="password" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" placeholder="4 digits" autocomplete="off" required></label>
+      <label class="field"><span>Type it again</span><input name="b" class="mono" type="password" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" placeholder="4 digits" autocomplete="off" required></label>
+      <button class="btn primary">Save PIN</button>
+    </form>
+    ${hasPin() ? `<button class="btn" data-act="off">Turn the lock off</button>` : ''}`;
+  return {
+    tab: 'more', modal: true, html,
+    on: { off: async () => { await M.setMeta('pin', null); toast('The lock is off. Everyone can open More.'); go('#/more'); } },
+    submit: async form => {
+      if (!/^[0-9]{4}$/.test(form.a.value)) return toast('Use exactly 4 digits.');
+      if (form.a.value !== form.b.value) return toast('The two PINs do not match.');
+      await savePin(form.a.value);
+      toast('PIN saved.'); go('#/more');
     },
   };
 };
