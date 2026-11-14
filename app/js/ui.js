@@ -32,6 +32,8 @@ const PATHS = {
   lock: '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
   phone: '<rect x="7" y="3" width="10" height="18" rx="2"/><path d="M11 18h2"/>',
   x: '<path d="m6 6 12 12M18 6 6 18"/>',
+  menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
+  clock: '<circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/>',
 };
 const ic = name => `<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${PATHS[name]}</svg>`;
 
@@ -86,20 +88,23 @@ async function emailFile(name, text, subject, body) {
 
 /* ---------- shell and routing ---------- */
 
-const TABS = [['home', 'Home', 'home'], ['assets', 'Assets', 'box'], ['movements', 'Movements', 'swap'], ['projects', 'Projects', 'folder'], ['share', 'Share', 'share']];
+const TABS = [['home', 'Home', 'home'], ['assets', 'Everything', 'box'], ['more', 'More', 'menu']];
 
 function shell(view) {
   const h = M.hall();
   const unsent = h ? M.unsentCount() : 0;
+  const tab = ['home', 'assets'].includes(view.tab) ? view.tab : 'more';
   const nav = view.bare ? '' : `
-    <nav class="nav ${view.modal ? 'nav-hide-narrow' : ''}">
+    <nav class="nav">
       <div class="brand"><img src="icon.svg" alt="" width="28" height="28"><span>LDC Inventory</span></div>
       <div class="tabs">${TABS.map(([id, label, icon]) => `
-        <a href="#/${id}" class="tab ${view.tab === id ? 'on' : ''}" ${view.tab === id ? 'aria-current="page"' : ''}>${ic(icon)}<span>${label}</span>${id === 'share' && unsent ? '<i class="dot"></i>' : ''}</a>`).join('')}
+        <a href="#/${id}" class="tab ${tab === id ? 'on' : ''}" ${tab === id ? 'aria-current="page"' : ''}>${ic(icon)}<span>${label}</span>${id === 'more' && unsent ? '<i class="dot"></i>' : ''}</a>`).join('')}
       </div>
       <div class="rail-foot">${ic('phone')}<span>Saved on this ${deviceName()}${unsent ? `<br><b>${plural(unsent, 'change')} not sent</b>` : ''}</span></div>
     </nav>`;
-  return `<div class="shell ${view.bare ? 'bare' : ''}">${nav}<main class="view ${view.split ? 'split' : ''}" id="view">${view.html}</main></div>`;
+  // On a phone there is no tab bar: every screen has one way back, to Home.
+  const homelink = view.bare || view.modal || view.split || view.tab === 'home' ? '' : `<a class="homelink" href="#/home">${ic('back')}Home</a>`;
+  return `<div class="shell ${view.bare ? 'bare' : ''}">${nav}<main class="view ${view.split ? 'split' : ''}" id="view">${homelink}${view.html}</main></div>`;
 }
 
 const VIEWS = {};
@@ -131,47 +136,44 @@ function render() {
 
 VIEWS.home = () => {
   const h = M.hall(), as = M.assets();
-  const st = new Map(as.map(a => [a.id, M.assetState(a)]));
-  const units = as.reduce((n, a) => n + a.qty, 0);
-  const outUnits = as.reduce((n, a) => n + st.get(a.id).out, 0);
-  const where = {};
-  for (const a of as) { const s = st.get(a.id); if (s.out) where[s.where] = (where[s.where] || 0) + s.out; }
-  const places = Object.entries(where).sort((a, b) => b[1] - a[1]).map(([w, n]) => `${n} at ${esc(w)}`).join(' · ');
-  const recent = M.movements().slice(0, 4);
+  const out = as.reduce((n, a) => n + M.assetState(a).out, 0);
+  const unsent = M.unsentCount();
   const hallPick = M.S.halls.length > 1
     ? `<select class="hall-pick" data-hall aria-label="Hall">${M.S.halls.map(x => `<option value="${x.id}" ${x.id === h.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select>`
-    : `<h1>${esc(h.name)}</h1>`;
+    : `<p class="hallname">${esc(h.name)}</p>`;
   const html = `
     <header class="top"><span class="eyebrow">LDC Inventory</span><span class="pill">${ic('phone')}Saved on this ${deviceName()}</span></header>
     ${hallPick}
-    <div class="stats">
-      <div><b>${as.length}</b><span>${as.length === 1 ? 'item' : 'items'}</span></div>
-      <div><b>${units}</b><span>units</span></div>
-      <div><b>${M.rooms().length}</b><span>rooms</span></div>
-    </div>
-    ${!as.length ? `<section class="card hint"><p>No equipment yet. Add your first item to get started.</p><a class="btn" href="#/item/new">${ic('plus')}Add an item</a></section>`
-      : outUnits ? `<section class="card warn"><h2>Out right now</h2><p class="big">${plural(outUnits, 'unit')}</p><p>${places}</p><a class="btn" href="#/assets?f=out">See what is out ${ic('chev')}</a></section>`
-      : `<section class="card good"><h2>${ic('check')}Everything is in place</h2><p>All ${plural(units, 'unit')} are in the hall.</p></section>`}
-    <div class="actions">
-      <a class="btn primary" href="#/log?type=out">${ic('up')}Take items out</a>
-      <a class="btn" href="#/log?type=back">${ic('down')}Bring items back</a>
-    </div>
-    <h3 class="sec">Rooms</h3>
-    <section class="card list">${M.rooms().map(r => {
-      const ras = as.filter(a => a.roomId === r.id), outItems = ras.filter(a => st.get(a.id).out).length;
-      return `<a class="row" href="#/assets?room=${r.id}"><span><b>${esc(r.name)}</b><small>${plural(ras.length, 'item')}</small></span>${
-        !ras.length ? '' : outItems ? chip('out', outItems === ras.length ? 'all out' : `${outItems} out`) : chip('in', 'all in')}${ic('chev')}</a>`;
-    }).join('') || '<p class="empty">No rooms yet.</p>'}</section>
-    <h3 class="sec">Recent movements <a href="#/movements">See all</a></h3>
-    <section class="card list">${recent.map(m => {
-      const a = M.byId('assets', m.assetRef);
-      return `<a class="row" href="#/asset/${m.assetRef}">${moveChip(m)}<span><b>${esc(a?.name || 'Removed item')} ×${m.qty}</b><small>to ${esc(m.to)} · ${fday(m.at)} · by ${esc(m.by)}</small></span></a>`;
-    }).join('') || '<p class="empty">Nothing has been logged yet.</p>'}</section>
-    <p class="foot"><a href="#/setup?new=1">Set up another hall</a></p>`;
+    ${!as.length ? `<h1>Add your first item</h1><section class="card hint"><p>There is no equipment in this hall yet.</p><a class="btn primary" href="#/item/new">${ic('plus')}Add an item</a></section>` : `
+    <h1>What are you doing?</h1>
+    <a class="choice out" href="#/log?type=out">${ic('up')}<b>Taking things out</b></a>
+    <a class="choice in" href="#/log?type=back">${ic('down')}<b>Bringing things back</b></a>
+    <a class="choice plain" href="#/assets">${ic('box')}<b>See everything</b></a>
+    <a class="status ${out ? 'warn' : 'good'}" href="#/assets?f=${out ? 'out' : 'all'}">${ic(out ? 'up' : 'check')}${out ? `${plural(out, 'thing')} out right now` : 'Everything is here'}</a>`}
+    <a class="morelink" href="#/more">${ic('menu')}More${unsent ? '<i class="dot"></i>' : ''}</a>`;
   return {
     tab: 'home', html,
     change: async el => { if (el.dataset.hall !== undefined) { await M.setMeta('hallId', el.value); render(); } },
   };
+};
+
+/* ---------- More: everything a coordinator needs, out of the volunteer's way ---------- */
+
+VIEWS.more = () => {
+  const unsent = M.unsentCount();
+  const row = (href, icon, title, sub, dot) => `<a class="row tall" href="${href}"><span class="rowic">${ic(icon)}</span><span><b>${title}</b><small>${sub}</small></span>${dot ? '<i class="dot"></i>' : ''}${ic('chev')}</a>`;
+  const html = `
+    <h1>More</h1>
+    <section class="card list">
+      ${row('#/projects', 'folder', 'Projects', 'Check that everything came back from a job')}
+      ${row('#/movements', 'clock', 'History', 'Everything that was taken out or brought back')}
+      ${row('#/share', 'share', 'Send or receive', unsent ? `${plural(unsent, 'change')} not sent yet` : 'Pass changes to another device by email', unsent)}
+    </section>
+    <section class="card list">
+      ${row('#/item/new', 'plus', 'Add an item', 'Put a new piece of equipment on the list')}
+      ${row('#/setup?new=1', 'home', 'Set up another hall', 'Keep a second hall on this device')}
+    </section>`;
+  return { tab: 'more', html };
 };
 
 /* ---------- Assets ---------- */
@@ -212,8 +214,8 @@ function assetsPane(selId) {
   const units = as.reduce((x, a) => x + a.qty, 0);
   const room = A.room && M.byId('rooms', A.room);
   return `
-    <header class="top"><div><h1>Assets</h1><p class="sub">${esc(M.hall().name)} · ${plural(as.length, 'item')} · ${plural(units, 'unit')}</p></div>
-      <a class="btn primary icon" href="#/item/new" aria-label="Add item">${ic('plus')}</a></header>
+    <header class="top"><div><h1>Everything</h1><p class="sub">${esc(M.hall().name)} · ${plural(as.length, 'item')} · ${plural(units, 'unit')}</p></div>
+      </header>
     <label class="search">${ic('search')}<input type="search" data-q placeholder="Search item, brand or serial" value="${esc(A.q)}"></label>
     <div class="chips">
       ${[['all', 'All'], ['out', 'Out'], ['in', 'In place'], ['noserial', 'No serial']].map(([k, l]) => `<button class="fchip ${A.f === k ? 'on' : ''}" data-act="f" data-v="${k}">${l} ${n[k]}</button>`).join('')}
@@ -246,7 +248,7 @@ function assetDetail(a) {
   const rows = [['Brand', a.brand], ['Model', a.model], ['Serial', a.serial ? `<span class="mono">${esc(a.serial)}</span>` : '<i>None recorded</i>', true],
     ['Quantity', a.qty], ['Condition', a.condition], ['Home room', M.roomName(a.roomId)], ['Last inventoried', fdate(a.lastInventoried)], ['Notes', a.notes]];
   return `
-    <header class="top bar"><a class="backlink" href="#/assets">${ic('back')}Assets</a><a class="textbtn" href="#/item/${a.id}">Edit</a></header>
+    <header class="top bar"><a class="backlink" href="#/assets">${ic('back')}Everything</a><a class="textbtn" href="#/item/${a.id}">Edit</a></header>
     <section class="card">
       <div class="between"><span class="mono">${esc(a.assetId)}</span>${statusChip(a, st)}</div>
       <h1>${esc(a.name)}</h1>
@@ -293,9 +295,12 @@ VIEWS.asset = ([id]) => {
   };
 };
 
-/* ---------- Log a movement ---------- */
+/* ---------- Taking out, bringing back, moving: one question at a time ---------- */
 
 let L = {};
+
+const logSteps = () => L.type === 'back' ? (L.skipHow ? ['items', 'who'] : L.all ? ['how', 'who'] : ['how', 'items', 'who'])
+  : L.type === 'move' ? ['items', 'room', 'who'] : ['items', 'where', 'who'];
 
 function logCandidates() {
   return M.assets().map(a => {
@@ -308,98 +313,127 @@ function logCandidates() {
 function logItems() {
   const q = L.q.trim().toLowerCase();
   const list = logCandidates().filter(c => !q || [c.a.name, c.a.brand, c.a.assetId].some(v => (v || '').toLowerCase().includes(q)));
-  if (!list.length) return `<p class="empty">${L.type === 'back' ? 'Nothing is out right now.' : L.type === 'out' ? 'Nothing is available to take out.' : 'No items.'}</p>`;
+  if (!list.length) return `<p class="empty">${q ? 'Nothing matches.' : L.type === 'back' ? 'Nothing is out right now.' : L.type === 'out' ? 'Everything is already out.' : 'No items.'}</p>`;
   return list.map(({ a, st, max }) => {
     const on = a.id in L.sel;
     return `<div class="pick ${on ? 'on' : ''}">
       <button type="button" class="box" data-act="toggle" data-id="${a.id}" data-max="${max}" role="checkbox" aria-checked="${on}" aria-label="${esc(a.name)}">${on ? ic('check') : ''}</button>
-      <span data-act="toggle" data-id="${a.id}" data-max="${max}"><b>${esc(a.name)}</b><small><span class="mono">${esc(a.assetId)}</span> · ${
-        L.type === 'move' ? esc(M.roomName(a.roomId)) : L.type === 'back' ? `${max} out at ${esc(st.where)}` : `${max} of ${a.qty} here`}</small></span>
+      <span data-act="toggle" data-id="${a.id}" data-max="${max}"><b>${esc(a.name)}</b><small>${
+        L.type === 'move' ? esc(M.roomName(a.roomId)) : L.type === 'back' ? `${max} out · ${esc(st.where)}` : max > 1 ? `${max} here` : esc(M.roomName(a.roomId))}</small></span>
       ${on && max > 1 && L.type !== 'move' ? `<span class="stepper"><button type="button" data-act="dec" data-id="${a.id}" aria-label="One fewer">−</button><b>${L.sel[a.id]}</b><button type="button" data-act="inc" data-id="${a.id}" data-max="${max}" aria-label="One more">+</button></span>` : ''}
     </div>`;
   }).join('');
 }
 
+const destination = () => !L.to ? '' : L.to === 'Somewhere else' ? L.detail.trim() : (L.to !== 'Connex' && L.detail.trim() ? `${L.to}: ${L.detail.trim()}` : L.to);
+
+function logSummary() {
+  const n = Object.keys(L.sel).length, units = Object.values(L.sel).reduce((a, b) => a + b, 0);
+  const things = `${plural(n, 'thing')}${units > n ? ` (${units} units)` : ''}`;
+  return L.type === 'out' ? `Taking out ${things} to ${destination()}.` : L.type === 'back' ? `Bringing back ${things}.` : `Moving ${things} to ${M.roomName(L.roomId)}.`;
+}
+
 VIEWS.log = (_, q) => {
   if (L.key !== location.hash) {
-    L = { key: location.hash, type: q.type || 'out', sel: {}, to: 'Connex', detail: '', roomId: '', projectId: q.project || '', newProject: '', by: M.S.meta.userName || '', notes: '', q: '', from: q };
+    L = { key: location.hash, type: q.type || 'out', sel: {}, to: '', detail: '', roomId: '', projectId: q.project || '', newProject: '', by: M.S.meta.userName || '', notes: '', q: '', from: q, all: false, skipHow: !!(q.asset || q.project), done: '' };
     if (q.asset) { const c = logCandidates().find(c => c.a.id === q.asset); if (c) L.sel[c.a.id] = c.max; }
     if (q.project && L.type === 'back') for (const c of logCandidates()) if (c.st.projectId === q.project) L.sel[c.a.id] = c.max;
+    L.step = logSteps()[0];
   }
-  const n = Object.keys(L.sel).length, units = Object.values(L.sel).reduce((a, b) => a + b, 0);
-  const dests = [['Connex', 'Storage container'], ['Another hall', 'Loaned out'], ['Off site', 'Repair or vendor'], ['Somewhere else', 'Type where below']];
-  const verb = { out: 'out', back: 'back', move: '' }[L.type];
-  const html = `
-    <header class="top bar"><a class="textbtn" data-act="cancel">Cancel</a><b>Log a movement</b><span></span></header>
-    <form>
-    <div class="seg">${[['out', 'Take out', 'up'], ['back', 'Bring back', 'down'], ['move', 'Move', 'swap']].map(([k, l, i]) => `<button type="button" class="${L.type === k ? 'on' : ''}" data-act="type" data-v="${k}">${ic(i)}${l}</button>`).join('')}</div>
-    <h3 class="sec">1 · Which items?</h3>
-    <label class="search">${ic('search')}<input type="search" data-lq placeholder="Search this hall's items" value="${esc(L.q)}"></label>
-    <section class="card list" id="picks">${logItems()}</section>
-    ${L.type === 'out' ? `
-      <h3 class="sec">2 · Where are they going?</h3>
-      <div class="tiles">${dests.map(([d, s]) => `<button type="button" class="tile ${L.to === d ? 'on' : ''}" data-act="to" data-v="${d}"><b>${d}</b><small>${s}</small></button>`).join('')}</div>
-      ${L.to !== 'Connex' ? `<label class="field"><span>Where exactly?${L.to === 'Somewhere else' ? '' : ' (optional)'}</span><input data-k="detail" value="${esc(L.detail)}" placeholder="e.g. Placerville hall"></label>` : ''}
-      <h3 class="sec">3 · Why</h3>
-      <section class="card">
+  const leave = () => { L.key = ''; go(L.from.project ? `#/project/${L.from.project}` : L.from.asset ? `#/asset/${L.from.asset}` : '#/home'); };
+  const redraw = () => { const y = window.scrollY; render(); window.scrollTo(0, y); };
+
+  if (L.step === 'done') {
+    return {
+      modal: true,
+      html: `<div class="done">${ic('check')}<h1>Done</h1><p>${esc(L.done)}</p></div>
+        <div class="stick col"><button class="btn primary" data-act="home">Back to start</button></div>`,
+      on: { home: () => { L.key = ''; go('#/home'); } },
+    };
+  }
+
+  const steps = logSteps(), i = steps.indexOf(L.step), last = i === steps.length - 1;
+  const cands = logCandidates();
+  const n = Object.keys(L.sel).length;
+  const title = {
+    how: 'What is coming back?',
+    items: L.type === 'out' ? 'What are you taking?' : L.type === 'back' ? 'Which ones are coming back?' : 'What are you moving?',
+    where: 'Where is it going?', room: 'Which room is its new home?', who: 'Who is doing this?',
+  }[L.step];
+  const dests = [['Connex', 'Storage container'], ['Another hall', 'Loaned out'], ['Off site', 'Repair or vendor'], ['Somewhere else', 'Type where']];
+  const body = {
+    how: () => !cands.length ? `<p class="empty">Nothing is out right now, so there is nothing to bring back.</p>` : `
+      <button class="choice in" data-act="all">${ic('check')}<b>Everything that is out</b><small>${plural(cands.reduce((x, c) => x + c.max, 0), 'thing')}</small></button>
+      <button class="choice plain" data-act="some">${ic('box')}<b>Only some of it</b><small>Choose which ones</small></button>`,
+    items: () => `
+      <label class="search">${ic('search')}<input type="search" data-lq placeholder="Find an item" value="${esc(L.q)}"></label>
+      <section class="card list" id="picks">${logItems()}</section>`,
+    where: () => `
+      <div class="tiles one">${dests.map(([d, sub]) => `<button type="button" class="tile ${L.to === d ? 'on' : ''}" data-act="to" data-v="${d}"><b>${d}</b><small>${sub}</small></button>`).join('')}</div>
+      ${L.to && L.to !== 'Connex' ? `<label class="field"><span>Where exactly?${L.to === 'Somewhere else' ? '' : ' (optional)'}</span><input data-k="detail" value="${esc(L.detail)}" placeholder="e.g. Maple Grove hall"></label>` : ''}`,
+    room: () => `<div class="tiles one">${M.rooms().map(r => `<button type="button" class="tile ${L.roomId === r.id ? 'on' : ''}" data-act="room" data-v="${r.id}"><b>${esc(r.name)}</b></button>`).join('')}</div>`,
+    who: () => `
+      <p class="summary">${esc(logSummary())}</p>
+      <label class="field"><span>Your name</span><input data-k="by" value="${esc(L.by)}" autocomplete="name" placeholder="So the log shows who did this"></label>
+      ${L.type === 'out' ? `<details class="fold plainfold" ${L.projectId || L.notes ? 'open' : ''}><summary>Add a project or a note (optional)</summary>
         <label class="field"><span>Project</span><select data-k="projectId">
           <option value="">No project</option>
           ${M.projects().filter(p => !p.finished || p.id === L.projectId).map(p => `<option value="${p.id}" ${L.projectId === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}
           <option value="new" ${L.projectId === 'new' ? 'selected' : ''}>+ New project…</option></select></label>
         ${L.projectId === 'new' ? `<label class="field"><span>New project name</span><input data-k="newProject" value="${esc(L.newProject)}" placeholder="e.g. Remodel 2026"></label>` : ''}
-        ${whoFields()}
-      </section>` : L.type === 'move' ? `
-      <h3 class="sec">2 · Which room is their new home?</h3>
-      <div class="tiles">${M.rooms().map(r => `<button type="button" class="tile ${L.roomId === r.id ? 'on' : ''}" data-act="room" data-v="${r.id}"><b>${esc(r.name)}</b></button>`).join('')}</div>
-      <h3 class="sec">3 · Who</h3><section class="card">${whoFields()}</section>` : `
-      <h3 class="sec">2 · Who</h3>
-      <section class="card"><p class="sub">Each item goes back to its home room.</p>${whoFields()}</section>`}
-    <div class="stick col">
-      ${n ? `<p class="summary">${plural(n, 'item')}${L.type === 'move' ? '' : ` · ${plural(units, 'unit')}`} ${L.type === 'out' ? `going to ${esc(destination() || '…')}` : L.type === 'back' ? 'coming back' : `moving${L.roomId ? ' to ' + esc(M.roomName(L.roomId)) : ''}`}</p>` : ''}
-      <button class="btn primary" ${n ? '' : 'disabled'}>${n ? (L.type === 'move' ? `Move ${plural(n, 'item')}` : `Log ${plural(units, 'unit')} ${verb}`) : 'Choose at least one item'}</button>
-      <small>Saved on this device. Log entries cannot be changed later.</small>
-    </div></form>`;
+        <label class="field"><span>Note</span><input data-k="notes" value="${esc(L.notes)}" placeholder="Anything worth remembering"></label>
+      </details>` : ''}`,
+  }[L.step]();
+  const ready = { how: false, items: n > 0, where: !!destination(), room: !!L.roomId, who: true }[L.step];
+  const html = `
+    <header class="top bar"><a class="textbtn" data-act="cancel">Cancel</a>
+      <span class="dots" aria-hidden="true">${steps.map((_, k) => `<b class="${k <= i ? 'on' : ''}"></b>`).join('')}</span>
+      <small>Step ${i + 1} of ${steps.length}</small></header>
+    <h1>${title}</h1>
+    ${body}
+    ${L.step === 'how' ? '' : `<div class="stick">
+      ${i > 0 ? `<button class="btn" data-act="back">${ic('back')}Back</button>` : ''}
+      <button class="btn primary grow" data-act="${last ? 'finish' : 'next'}" ${ready ? '' : 'disabled'}>${last ? 'Finish' : L.step === 'items' && n ? `Next · ${plural(n, 'thing')}` : 'Next'}</button>
+    </div>`}`;
 
-  const leave = () => go(L.from.project ? `#/project/${L.from.project}` : L.from.asset ? `#/asset/${L.from.asset}` : '#/home');
-  const redraw = () => { current.keepScroll = true; const y = window.scrollY; render(); window.scrollTo(0, y); };
   return {
     modal: true, html,
     on: {
       cancel: leave,
-      type: el => { L.type = el.dataset.v; L.sel = {}; redraw(); },
+      all: () => { L.all = true; L.sel = {}; for (const c of logCandidates()) L.sel[c.a.id] = c.max; L.step = 'who'; redraw(); },
+      some: () => { L.all = false; L.sel = {}; L.step = 'items'; redraw(); },
+      next: () => { L.step = steps[i + 1]; L.q = ''; render(); },
+      back: () => { L.step = steps[i - 1]; if (L.step === 'how') L.all = false; render(); },
       toggle: el => { const id = el.dataset.id; if (id in L.sel) delete L.sel[id]; else L.sel[id] = +el.dataset.max; redraw(); },
       inc: el => { L.sel[el.dataset.id] = Math.min(+el.dataset.max, L.sel[el.dataset.id] + 1); redraw(); },
       dec: el => { L.sel[el.dataset.id] = Math.max(1, L.sel[el.dataset.id] - 1); redraw(); },
       to: el => { L.to = el.dataset.v; redraw(); },
       room: el => { L.roomId = el.dataset.v; redraw(); },
+      finish: async () => {
+        const items = Object.entries(L.sel).map(([id, qty]) => ({ asset: M.byId('assets', id), qty }));
+        if (!items.length) return;
+        if (!L.by.trim()) return toast('Add your name so the log shows who did this.');
+        let projectId = L.projectId;
+        if (L.type === 'out' && projectId === 'new') {
+          if (!L.newProject.trim()) return toast('Give the new project a name.');
+          projectId = (await M.createProject(L.newProject.trim())).id;
+        }
+        const summary = logSummary().replace(/^Taking out/, 'Took out').replace(/^Bringing back/, 'Brought back').replace(/^Moving/, 'Moved');
+        await M.logMovements({ type: L.type, items, to: destination(), toRoomId: L.roomId, projectId, by: L.by.trim(), notes: L.notes.trim() });
+        L.done = summary; L.step = 'done'; render();
+        L.key = ''; // the next visit starts a fresh flow instead of showing this Done screen again
+      },
     },
     input: el => {
       if (el.dataset.lq !== undefined) { L.q = el.value; $('#picks').innerHTML = logItems(); }
-      else if (el.dataset.k && el.tagName !== 'SELECT') L[el.dataset.k] = el.value;
+      else if (el.dataset.k && el.tagName !== 'SELECT') {
+        L[el.dataset.k] = el.value;
+        if (el.dataset.k === 'detail') { const b = $('[data-act=next]'); if (b) b.disabled = !destination(); }
+      }
     },
     change: el => { if (el.tagName === 'SELECT' && el.dataset.k) { L[el.dataset.k] = el.value; redraw(); } },
-    submit: async () => {
-      const items = Object.entries(L.sel).map(([id, qty]) => ({ asset: M.byId('assets', id), qty }));
-      if (!items.length) return;
-      if (!L.by.trim()) return toast('Add your name so the log shows who did this.');
-      if (L.type === 'out' && !destination()) return toast('Say where the items are going.');
-      if (L.type === 'move' && !L.roomId) return toast('Choose the room they are moving to.');
-      let projectId = L.projectId;
-      if (L.type === 'out' && projectId === 'new') {
-        if (!L.newProject.trim()) return toast('Give the new project a name.');
-        projectId = (await M.createProject(L.newProject.trim())).id;
-      }
-      await M.logMovements({ type: L.type, items, to: destination(), toRoomId: L.roomId, projectId, by: L.by.trim(), notes: L.notes.trim() });
-      toast({ out: 'Logged out.', back: 'Logged back in.', move: 'Moved.' }[L.type]);
-      L.key = ''; leave();
-    },
   };
 };
-
-const destination = () => L.to === 'Connex' ? 'Connex' : L.to === 'Somewhere else' ? L.detail.trim() : (L.detail.trim() ? `${L.to}: ${L.detail.trim()}` : L.to);
-const whoFields = () => `
-  <label class="field"><span>Your name</span><input data-k="by" value="${esc(L.by)}" autocomplete="name"></label>
-  <label class="field"><span>Note (optional)</span><input data-k="notes" value="${esc(L.notes)}" placeholder="Anything worth remembering"></label>`;
 
 /* ---------- Movements ---------- */
 
@@ -429,8 +463,8 @@ VIEWS.movements = () => {
   const n = { all: all.length, out: 0, back: 0, move: 0 };
   for (const m of all) n[m.type]++;
   const html = `
-    <header class="top"><div><h1>Movements</h1><p class="sub">${esc(M.hall().name)} · ${plural(all.length, 'entry').replace('entrys', 'entries')}</p></div>
-      <a class="btn primary icon" href="#/log?type=out" aria-label="Log a movement">${ic('plus')}</a></header>
+    <header class="top"><div><h1>History</h1><p class="sub">${esc(M.hall().name)} · ${plural(all.length, 'entry').replace('entrys', 'entries')}</p></div>
+      </header>
     <label class="search">${ic('search')}<input type="search" data-q placeholder="Search item, person or project" value="${esc(V.q)}"></label>
     <div class="chips">
       ${[['all', 'All'], ['out', 'Out'], ['back', 'Returned'], ['move', 'Moved']].map(([k, l]) => `<button class="fchip ${V.f === k ? 'on' : ''}" data-act="f" data-v="${k}">${l} ${n[k]}</button>`).join('')}
@@ -537,7 +571,7 @@ VIEWS.share = () => {
   const opt = (k, title, sub) => `<label class="radio ${H.kind === k ? 'on' : ''}"><input type="radio" name="kind" value="${k}" ${H.kind === k ? 'checked' : ''}><span><b>${title}</b><small>${sub}</small></span></label>`;
   const plan = H.plan;
   const html = `
-    <header class="top"><div><h1>Share</h1><p class="sub">Everything is saved on this ${deviceName()}. Nothing is uploaded.</p></div></header>
+    <header class="top"><div><h1>Send or receive</h1><p class="sub">Everything is saved on this ${deviceName()}. Nothing is uploaded.</p></div></header>
     <section class="card ${unsent ? 'warn' : 'good'}"><h2>${unsent ? `${plural(unsent, 'change')} not sent yet` : `${ic('check')}Nothing new to send`}</h2>
       <p>${last.at ? `Last sent ${fdate(last.at)}.` : 'Nothing has been sent from this device yet.'}</p></section>
     <section class="card"><h2>Send your inventory</h2>

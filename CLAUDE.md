@@ -78,6 +78,19 @@ A CSV whose first header cell is not `record` is treated as a spreadsheet list f
 setup: a row with only its first cell filled starts a new room, and any item whose location
 is not the hall starts as "out".
 
+## Keep it simple for volunteers
+
+The owner asked for an interface a non-technical person cannot get lost in (2026-11-13). Hold to it:
+
+- Home is one question, "What are you doing?", with two big buttons (taking out, bringing
+  back) plus "See everything". Do not add more choices to it.
+- Taking out, bringing back and moving are step-by-step flows (`VIEWS.log`): one question per
+  screen, Back and Next, a Done screen at the end. "Bring back" offers "Everything that is
+  out" first so the common case is two taps.
+- On a phone there is no tab bar; every other screen has a single "Home" link. Projects,
+  History, Send or receive, Add an item and hall setup live behind "More".
+- Say "things", not "assets" or "units", in volunteer-facing copy.
+
 ## Conventions
 
 - Asset IDs are `LDC-<hall code>-<4 digits>`, e.g. `LDC-CDR-0042`. This format is a
