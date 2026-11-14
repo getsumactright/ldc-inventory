@@ -90,6 +90,11 @@ The owner asked for an interface a non-technical person cannot get lost in (2026
 - On a phone there is no tab bar; every other screen has a single "Home" link. Projects,
   History, Send or receive, Add an item and hall setup live behind "More".
 - Say "things", not "assets" or "units", in volunteer-facing copy.
+- **Coordinator PIN** (optional, 4 digits, set at setup or under More). With one set, the routes
+  in `GATED` in `js/ui.js` show the keypad until unlocked; volunteers keep take out, bring back,
+  See everything and "Send my changes". It is stored salted and hashed in `meta.pin` on the
+  device, is not part of the CSV, auto-locks after 10 minutes, and can be removed by typing the
+  hall name. It is a convenience lock, not security. Put any new coordinator screen in `GATED`.
 
 ## Conventions
 
